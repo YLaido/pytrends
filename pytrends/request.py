@@ -8,8 +8,8 @@ import requests
 
 from pandas.io.json._normalize import nested_to_record
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-
+# from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 from pytrends import exceptions
 
 from urllib.parse import quote
@@ -122,41 +122,50 @@ class TrendReq(object):
                           connect=self.retries,
                           backoff_factor=self.backoff_factor,
                           status_forcelist=TrendReq.ERROR_CODES,
+                          raise_on_status=False,
                           method_whitelist=frozenset(['GET', 'POST']))
             s.mount('https://', HTTPAdapter(max_retries=retry))
 
-        s.headers.update({'accept-language': self.hl})
-        if len(self.proxies) > 0:
-            self.cookies = self.GetGoogleCookie()
-            s.proxies.update({'https': self.proxies[self.proxy_index]})
-        if method == TrendReq.POST_METHOD:
-            response = s.post(url, timeout=self.timeout,
-                              cookies=self.cookies, **kwargs,
-                              **self.requests_args)  # DO NOT USE retries or backoff_factor here
-        else:
-            response = s.get(url, timeout=self.timeout, cookies=self.cookies,
-                             **kwargs, **self.requests_args)  # DO NOT USE retries or backoff_factor here
-        # check if the response contains json and throw an exception otherwise
-        # Google mostly sends 'application/json' in the Content-Type header,
-        # but occasionally it sends 'application/javascript
-        # and sometimes even 'text/javascript
-        if response.status_code == 200 and 'application/json' in \
-                response.headers['Content-Type'] or \
-                'application/javascript' in response.headers['Content-Type'] or \
-                'text/javascript' in response.headers['Content-Type']:
-            # trim initial characters
-            # some responses start with garbage characters, like ")]}',"
-            # these have to be cleaned before being passed to the json parser
-            content = response.text[trim_chars:]
-            # parse json
-            self.GetNewProxy()
-            return json.loads(content)
-        else:
-            # error
-            raise exceptions.ResponseError(
-                'The request failed: Google returned a '
-                'response with code {0}.'.format(response.status_code),
-                response=response)
+        s.headers.update({'accept-language': self.hl,
+                          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.85 Safari/537.36'})
+        retries_with_new_proxy = self.retries if self.retries > 1 else 3
+        for _ in range(retries_with_new_proxy):  # retry 3 times at 429 using new proxies
+            if len(self.proxies) > 0:
+                self.cookies = self.GetGoogleCookie()
+                s.proxies.update({'https': self.proxies[self.proxy_index]})
+            try:
+                if method == TrendReq.POST_METHOD:
+                    response = s.post(url, timeout=self.timeout,
+                                      cookies=self.cookies, **kwargs,
+                                      **self.requests_args)  # DO NOT USE retries or backoff_factor here
+                else:
+                    response = s.get(url, timeout=self.timeout, cookies=self.cookies,
+                                     **kwargs, **self.requests_args)  # DO NOT USE retries or backoff_factor here
+                # check if the response contains json and throw an exception otherwise
+                # Google mostly sends 'application/json' in the Content-Type header,
+                # but occasionally it sends 'application/javascript
+                # and sometimes even 'text/javascript
+                if response.status_code == 200 and 'application/json' in \
+                        response.headers['Content-Type'] or \
+                        'application/javascript' in response.headers['Content-Type'] or \
+                        'text/javascript' in response.headers['Content-Type']:
+                    # trim initial characters
+                    # some responses start with garbage characters, like ")]}',"
+                    # these have to be cleaned before being passed to the json parser
+                    content = response.text[trim_chars:]
+                    # parse json
+                    self.GetNewProxy()
+                    return json.loads(content)
+                else:
+                    # error
+                    raise exceptions.ResponseError(
+                        'The request failed: Google returned a '
+                        'response with code {0}.'.format(response.status_code),
+                        response=response)
+                    continue
+            except (exceptions.RetryError, MaxRetryError):
+                continue
+
 
     def build_payload(self, kw_list, cat=0, timeframe='today 5-y', geo='',
                       gprop=''):
@@ -185,7 +194,7 @@ class TrendReq(object):
     def _tokens(self):
         """Makes request to Google to get API tokens for interest over time, interest by region and related queries"""
         # make the request and parse the returned json
-        widget_dicts = self._get_data(
+        widget_dict = self._get_data(
             url=TrendReq.GENERAL_URL,
             method=TrendReq.GET_METHOD,
             params=self.token_payload,
@@ -198,7 +207,7 @@ class TrendReq(object):
         self.related_queries_widget_list[:] = []
         self.related_topics_widget_list[:] = []
         # assign requests
-        for widget in widget_dicts:
+        for widget in widget_dict:
             if widget['id'] == 'TIMESERIES':
                 self.interest_over_time_widget = widget
             if widget['id'] == 'GEO_MAP' and first_region_token:
