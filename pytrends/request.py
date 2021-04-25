@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
-
+from requests.exceptions import RetryError
+from urllib3.exceptions import MaxRetryError
 from pandas.io.json._normalize import nested_to_record
 from requests.adapters import HTTPAdapter
 # from requests.packages.urllib3.util.retry import Retry
@@ -133,6 +134,7 @@ class TrendReq(object):
             if len(self.proxies) > 0:
                 self.cookies = self.GetGoogleCookie()
                 s.proxies.update({'https': self.proxies[self.proxy_index]})
+                print('Using proxy: {}'.format(str(self.proxies[self.proxy_index])))
             try:
                 if method == TrendReq.POST_METHOD:
                     response = s.post(url, timeout=self.timeout,
@@ -156,6 +158,9 @@ class TrendReq(object):
                     # parse json
                     self.GetNewProxy()
                     return json.loads(content)
+                elif response.status_code == 429:
+                    print('Google complains 429. Switch to another proxy.')
+                    continue
                 else:
                     # error
                     raise exceptions.ResponseError(
@@ -163,7 +168,7 @@ class TrendReq(object):
                         'response with code {0}.'.format(response.status_code),
                         response=response)
                     continue
-            except (exceptions.RetryError, MaxRetryError):
+            except (RetryError, MaxRetryError):
                 continue
 
 
