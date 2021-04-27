@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pandas as pd
 import requests
-from requests.exceptions import RetryError
+from requests.exceptions import RetryError,ProxyError,Timeout
 from urllib3.exceptions import MaxRetryError
 from pandas.io.json._normalize import nested_to_record
 from requests.adapters import HTTPAdapter
@@ -169,7 +169,7 @@ class TrendReq(object):
                         'response with code {0}.'.format(response.status_code),
                         response=response)
                     continue
-            except (RetryError, MaxRetryError):
+            except (RetryError, MaxRetryError, ProxyError):
                 continue
 
 
