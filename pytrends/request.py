@@ -169,7 +169,7 @@ class TrendReq(object):
                         'response with code {0}.'.format(response.status_code),
                         response=response)
                     continue
-            except (RetryError, MaxRetryError, ProxyError):
+            except (RetryError, MaxRetryError, ProxyError, Timeout):
                 continue
 
 
